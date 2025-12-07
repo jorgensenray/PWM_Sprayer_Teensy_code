@@ -1,6 +1,6 @@
 # PWM_Sprayer_Teensy_code
 
-Thanks to Matt Elias for the class structured AOG machine code  https://github.com/m-elias/AOG-Machine.  I just laid the PWM to it.  Also thanks to whiterose on the AOG forum for the help with curcuits for the PWM driver board.
+Thanks to Matt Elias for the class structured AOG machine code  https://github.com/m-elias/AOG-Machine.  I just added the PWM to it.  Also thanks to whiterose on the AOG forum for the help with curcuits for the PWM driver board.
 
 A working, cost effective PWM sprayer.  This is a companion app to Ag Open GPS.  To learn more https://discourse.agopengps.com/  Communication is via UDP between this app and the teensy 4.1.
 
