@@ -5,7 +5,89 @@
 
 // Declared because function uses a default parameter:
 void BasicPWM(size_t nozzleIndex, uint8_t currentPin, uint8_t dutyPercent = 50);
+// Forward declarations
+void EvenOdd(size_t nozzleIndex, uint8_t currentPin, bool globalEvenNozzlesActive);
 
+void PWM_Controls() {
+
+  // Recalculate period based on the current frequency.
+  period = static_cast<uint32_t>(1000.0 / userSettings.Hz);
+  unsigned long cycleTime = millis() % period;
+  bool globalEvenNozzlesActive = (cycleTime < (period / 2));
+
+  for (size_t i = 0; i < pinStates.size(); i++) {
+
+    bool isPinOn = pinStates[i].state;
+    uint8_t currentPin = pinStates[i].pinNumber;
+
+    // ✅ STABLE nozzle index derived from physical pin (pins 1..16 => index 0..15)
+    // If your nozzle pins are not contiguous someday, we’ll swap this for a lookup table.
+    if (currentPin < 1 || currentPin > 64) {
+      continue;  // safety
+    }
+    size_t nozzleIndex = (size_t)(currentPin - 1);
+
+    if ((debugPwmLevel == 3) && (currentPin <= 3)) {
+      Serial.print("PWM_Controls: i=");
+      Serial.print(i);
+      Serial.print(" pin=");
+      Serial.print(currentPin);
+      Serial.print(" nozzleIndex=");
+      Serial.print(nozzleIndex);
+      Serial.print(" isPinOn=");
+      Serial.println(isPinOn ? "YES" : "NO");
+    }
+
+    boomLength = (numActiveNozzles * userSettings.SprayWidth);
+    pinNum = currentPin;  // global used elsewhere
+
+    TurnComp = (fabs(steerAngle) > userSettings.WheelAngle);
+
+    PrintAOGstuff();
+    Pressure();
+    Flow();
+
+    if (isPinOn) {
+
+      // Conventional PWM (no stagger)
+      if ((userSettings.PWM_Conventional == 1) && (userSettings.Stagger == 0) && (TurnComp == false)) {
+        setPWMTiming(userSettings.Hz, newDutyCycle, nozzleIndex);
+        ControlNozzles(nozzleIndex, currentPin);
+      }
+
+      // Even/Odd (stagger)
+      if ((userSettings.PWM_Conventional == 1) && (userSettings.Stagger == 1) && (TurnComp == false)) {
+        EvenOdd(nozzleIndex, currentPin, globalEvenNozzlesActive);
+        ControlNozzles(nozzleIndex, currentPin);
+      }
+
+      // Even/Odd with turn comp
+      if ((userSettings.PWM_Conventional == 1) && (userSettings.Stagger == 1) && (TurnComp == true)) {
+        EvenOdd(nozzleIndex, currentPin, globalEvenNozzlesActive);
+        if (OnTime[nozzleIndex] > 0) {
+          NozzleSpeed(nozzleIndex, currentPin);
+        }
+        ControlNozzles(nozzleIndex, currentPin);
+      }
+
+      // Conventional with turn comp (no stagger)
+      if ((userSettings.PWM_Conventional == 1) && (userSettings.Stagger == 0) && (TurnComp == true)) {
+        NozzleSpeed(nozzleIndex, currentPin);
+        ControlNozzles(nozzleIndex, currentPin);
+      }
+
+      // Conventional ON/OFF (no PWM)
+      if (userSettings.PWM_Conventional == 0) {
+        digitalWrite(currentPin, HIGH);
+      }
+
+    } else {
+      digitalWrite(currentPin, LOW);
+    }
+  }
+}
+
+/*
 void PWM_Controls() {
 
   // Recalculate period based on the current frequency.
@@ -98,6 +180,7 @@ void PWM_Controls() {
     }
   }
 }
+*/
 
 // ----- Fast GPA display filter -----
 // float gpaDisplay = 0.0f;           // fast-smoothed GPA for the user - made global
@@ -190,27 +273,27 @@ void Flow() {
     // Use the adjusted duty for PWM / K&H
     newDutyCycle = userSettings.currentDutyCycle;
 
-  // --- Acres calculation (rate + cumulative) ---
-  // Only accumulate when we're actually spraying
-  if (numActiveNozzles > 0 && gpsSpeed > 0.01f) {
-    // boomLength is in inches; convert to feet
-    float widthFt = boomLength / 12.0f;
+    // --- Acres calculation (rate + cumulative) ---
+    // Only accumulate when we're actually spraying
+    if (numActiveNozzles > 0 && gpsSpeed > 0.01f) {
+      // boomLength is in inches; convert to feet
+      float widthFt = boomLength / 12.0f;
 
-    // Instantaneous acres/hour
-    acresPerHour = (gpsSpeed * widthFt) / 8.25f;
+      // Instantaneous acres/hour
+      acresPerHour = (gpsSpeed * widthFt) / 8.25f;
 
-    // Time step in hours, based on FLOW_SAMPLE_MS
-    float dtHours = (float)FLOW_SAMPLE_MS / 3600000.0f; // ms -> hours
+      // Time step in hours, based on FLOW_SAMPLE_MS
+      float dtHours = (float)FLOW_SAMPLE_MS / 3600000.0f;  // ms -> hours
 
-    // Acres sprayed during this sample interval
-    float deltaAcres = acresPerHour * dtHours;
+      // Acres sprayed during this sample interval
+      float deltaAcres = acresPerHour * dtHours;
 
-    // Accumulate total
-    acresTotal += deltaAcres;
-  } else {
-    // Not spraying – still keep a valid "zero" rate for UI
-    acresPerHour = 0.0f;
-  }
+      // Accumulate total
+      acresTotal += deltaAcres;
+    } else {
+      // Not spraying – still keep a valid "zero" rate for UI
+      acresPerHour = 0.0f;
+    }
 
     // --- Debug output ---
     if (debugPwmLevel == 6) {
@@ -255,12 +338,14 @@ void Flow() {
 void setPWMTiming(unsigned int freq, float dutyCycle, size_t nozzleIndex) {
   freq = userSettings.Hz;
   period = static_cast<uint32_t>(1000.0 / freq);
-  userSettings.currentDutyCycle = dutyCycle;  // Use the passed dutyCycle
 
-  if (nozzleIndex < numActiveNozzles) {
-    OnTime[nozzleIndex] = static_cast<uint32_t>((period * dutyCycle) / 100.0);
+  // Clamp duty
+  if (dutyCycle < 0.0f) dutyCycle = 0.0f;
+  if (dutyCycle > 100.0f) dutyCycle = 100.0f;
+
+  if (nozzleIndex < MAX_NOZZLES) {
+    OnTime[nozzleIndex] = static_cast<uint32_t>((period * dutyCycle) / 100.0f);
   }
-
   if (debugPwmLevel == 2) {
     if (printTimer > PrintFrequency) {
       Serial.print("newDutyCycle (from parameter) ");
@@ -276,38 +361,28 @@ void setPWMTiming(unsigned int freq, float dutyCycle, size_t nozzleIndex) {
   }
 }
 
-void EvenOdd(size_t nozzleIndex, uint8_t currentPin, bool globalEvenNozzlesActive) {
+void EvenOdd(size_t nozzleIndex, uint8_t currentPin, bool /*globalEvenNozzlesActive*/) {
+  // Even pins: phase 0
+  // Odd  pins: phase = half of the PWM period
   bool isEven = (currentPin % 2 == 0);
 
-  // Decide whether this nozzle is in the active group this half-cycle
-  bool isActiveGroup =
-    (globalEvenNozzlesActive && isEven) ||  // even pins active when flag is true
-    (!globalEvenNozzlesActive && !isEven);  // odd pins active when flag is false
+  uint32_t perMs = period;  // global PWM period in ms (already maintained)
+  uint32_t phase = 0;
 
-  // Start from the global newDutyCycle computed by your flow/GPA logic
-  float appliedDuty = 0.0f;
-
-  if (isActiveGroup) {
-    appliedDuty = newDutyCycle;
-
-    // ---- bench-friendly minimum duty ----
-    // If GPA logic says "tiny but non-zero", we bump it up so valves actually move.
-    const float minActiveDuty = 30.0f;  // <-- try 30% to start
-    if (appliedDuty > 0.0f && appliedDuty < minActiveDuty) {
-      appliedDuty = minActiveDuty;
-    }
-
-  } else {
-    appliedDuty = 0.0f;  // inactive group is fully off
+  if (!isEven) {
+    // Half-period phase shift for odd nozzles
+    phase = perMs / 2;
   }
 
-  // Clamp to valid range
-  appliedDuty = constrain(appliedDuty, 0.0f, 100.0f);
+  // Store per-nozzle phase offset
+  if (nozzleIndex < maxNozzles) {
+    PwmPhaseOffset[nozzleIndex] = phase;
+  }
 
-  // Apply timing for this nozzle index
-  setPWMTiming(userSettings.Hz, appliedDuty, nozzleIndex);
+  // All nozzles keep the SAME duty cycle.
+  // Even/odd only affects *when* in the period they are ON, not *how much*.
+  setPWMTiming(userSettings.Hz, newDutyCycle, nozzleIndex);
 
-  // Optional debug
   if (debugPwmLevel == 5) {
     Serial.print("EvenOdd Debug - Nozzle: ");
     Serial.print(nozzleIndex);
@@ -315,14 +390,12 @@ void EvenOdd(size_t nozzleIndex, uint8_t currentPin, bool globalEvenNozzlesActiv
     Serial.print(currentPin);
     Serial.print(" | isEven: ");
     Serial.print(isEven ? "true" : "false");
-    Serial.print(" | globalEvenNozzlesActive: ");
-    Serial.print(globalEvenNozzlesActive ? "true" : "false");
-    Serial.print(" | isActiveGroup: ");
-    Serial.print(isActiveGroup ? "true" : "false");
-    Serial.print(" | appliedDuty: ");
-    Serial.println(appliedDuty);
+    Serial.print(" | phaseOffset(ms): ");
+    Serial.println(phase);
   }
 }
+
+
 /*
 void EvenOdd(size_t nozzleIndex, uint8_t currentPin, bool globalEvenNozzlesActive) {
   bool isEven = (currentPin % 2 == 0);
@@ -381,7 +454,7 @@ void Pressure() {
       //pressure = ((voltage - 0.33) * (maxPressure - minPressure)) / (2.97 - 0.33) + minPressure;
 
       read_pressure = 0;  // Reset the timer for the next reading
-/*
+                          /*
       if (userSettings.Ball_Hyd == 1) {
         Output = userSettings.PressureTarget - pressure;
         if ((Output <= userSettings.LowBallValve) && (Output > 2)) {
@@ -444,7 +517,8 @@ void ControlNozzles(size_t nozzleIndex, uint8_t currentPin) {
   }
 
   uint32_t onMs = OnTime[nozzleIndex];
-  uint32_t phaseMs = PwmTimer[nozzleIndex];
+  uint32_t rawPhase = PwmTimer[nozzleIndex];
+  uint32_t phaseMs = (rawPhase + PwmPhaseOffset[nozzleIndex]) % perMs;
 
   // If this nozzle is "off" in this PWM cycle, keep it off.
   if (onMs == 0) {
@@ -810,16 +884,10 @@ void Calibrate_PSI_Flow() {
 }
 
 void setupNozzles() {
-  //if (numActiveNozzles < 1) numActiveNozzles = 1;  // Ensure the number of active nozzles is valid
-
-  for (uint8_t i = 0; i <= numActiveNozzles; i++) {  // Initialize all values to 0
+  for (uint8_t i = 0; i < MAX_NOZZLES; i++) {
     OnTime[i] = 0;
     PwmTimer[i] = 0;
   }
-
-  //Serial.print("Allocated OnTime & PwmTimer arrays for ");
-  //Serial.print(numActiveNozzles);
-  //Serial.println(" nozzles.");
 }
 
 void pwmtimerstates() {
@@ -953,4 +1021,21 @@ void resetFlowAverages() {
   pulseAvg.clear();  // clear LPM moving average
   GPA_Avg.clear();   // clear GPA moving average
   actualGPAave = 0.0f;
+}
+
+void debugPinMapping() {
+  Serial.println("=== Machine pin mapping ===");
+  for (uint8_t i = 0; i < numMachineOutputs; i++) {
+    uint8_t pin = machineOutputPins[i];
+    uint8_t funcIndex = machine.config.pinFunction[i];  // or [i-1] depending on your current code
+
+    Serial.print("Index ");
+    Serial.print(i);
+    Serial.print(" -> pin ");
+    Serial.print(pin);
+    Serial.print(" uses function index ");
+    Serial.print(funcIndex);
+    Serial.print(" state=");
+    Serial.println(machine.state.functions[funcIndex] ? "ON" : "OFF");
+  }
 }

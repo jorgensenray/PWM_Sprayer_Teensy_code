@@ -65,56 +65,33 @@ void updatePinStates() {   // “send me the full updatePinStates() with reset i
 */
 
 void updatePinStates() {
-  // Clear previous states to avoid duplicates
   pinStates.clear();
   numActiveNozzles = 0;
 
-  // Walk all configured machine outputs (pins 1..16)
   for (uint8_t i = 0; i < numMachineOutputs; i++) {
     uint8_t pinNumLocal = machineOutputPins[i];
 
-    // Map this output index -> machine function -> ON/OFF state
     bool isOnLocal = static_cast<bool>(
       machine.state.functions[machine.config.pinFunction[i]]
     );
 
-    // Look for an existing entry for this pin
-    bool found = false;
-    for (auto& pinState : pinStates) {
-      if (pinState.pinNumber == pinNumLocal) {
-        if (pinState.state != isOnLocal) {
-          pinState.state = isOnLocal;
-        }
-        if (isOnLocal) {
-          numActiveNozzles++;
-        }
-        found = true;
-        break;
-      }
-    }
-
-    // If pin not yet present, add it
-    if (!found) {
-      pinStates.push_back({ pinNumLocal, isOnLocal });
-      if (isOnLocal) {
-        numActiveNozzles++;
-      }
-    }
+    pinStates.push_back({ pinNumLocal, isOnLocal });
+    if (isOnLocal) numActiveNozzles++;
   }
 
-  // Keep nozzle timing arrays aligned
-  setupNozzles();
-
-  // ---- NEW: detect OFF→ON transition & reset flow filters ----
+  // ---- detect OFF→ON transition & reset flow filters ----
   static bool spraying = false;
   bool nowSpraying = (numActiveNozzles > 0);
 
   if (nowSpraying && !spraying) {
     resetFlowAverages();   // fresh GPA/flow for this spray run
+    // Optional: also reset PWM phase timing at spray start
+    // setupNozzles();
   }
 
   spraying = nowSpraying;
 }
+
 
 void setOutputPinModes() {
   if (numMachineOutputs > 0) {

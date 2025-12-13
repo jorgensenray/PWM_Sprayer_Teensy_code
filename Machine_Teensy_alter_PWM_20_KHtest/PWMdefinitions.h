@@ -23,7 +23,7 @@ void addPinState(uint8_t pinNum, bool isPinOn) {
   pinStates.push_back({ pinNum, isPinOn });
 }
 
-const uint8_t maxNozzles = 17;           // Maximum number of nozzles plus one extra for safety
+const uint8_t maxNozzles = 16;           // Maximum number of nozzles plus one extra for safety
 uint32_t PwmTimer[maxNozzles] = { 0 };   // Array for each pin's PWM timer
 uint32_t OnTime[maxNozzles] = { 0 };     // Array for each pin's on time
 bool nozzleState[maxNozzles] = { LOW };  // Track ON/OFF state per nozzle
@@ -32,14 +32,11 @@ unsigned long lastToggleTime = 0;
 
 
 // Configure the motor driver.
-CytronMD motor(PWM_DIR, 29, 28);  // PWM = Pin 29 White, DIR = Pin 28 Red,  Ball Valve
+// CytronMD motor(PWM_DIR, 29, 28);  // PWM = Pin 29 White, DIR = Pin 28 Red,  Ball Valve
 
 // Pin Definitions
-//#define N1Pin 4
 #define flowSensorPin 0  // 0
 #define PressurePin 41   // A17
-#define GPS_Standin A16  // Pot
-
 
 // User Variables
 struct UserSettings {
@@ -136,6 +133,7 @@ uint8_t pinNum = 0;
 // Variables for timing
 uint32_t period = 0;  // Total period of the cycle in milliseconds
 double onTime = 50;   // On-time in milliseconds
+uint32_t PwmPhaseOffset[maxNozzles] = { 0 };
 
 // Running average objects
 RunningAverage pulseAvg(16);  // Running average for sensor value (6-sample buffer)

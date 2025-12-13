@@ -43,4 +43,7 @@ void PWM_setup() {
 
   // Set the default duty cycle at startup
   userSettings.currentDutyCycle = defaultDutyCycle;
+  updatePinStates();
+  
+  debugPinMapping();
 }
