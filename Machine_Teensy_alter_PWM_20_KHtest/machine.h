@@ -87,7 +87,7 @@ public:
     uint8_t user3;
     uint8_t user4;
 
-    uint8_t pinFunction[24] = { 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    uint8_t pinFunction[36] = { 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
   };
   /* function numbers as below, assigned to pinFunction[], the default above has pin 1-3 as section 1-3
   1-16   Section 1-16

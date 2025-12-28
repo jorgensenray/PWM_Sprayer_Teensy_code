@@ -161,24 +161,11 @@ void handleUDPMessage(const uint8_t* data, size_t len) {
     userSettings.KH_holdPWMFrequency = KH_holdPWMFrequency;
     userSettings.KH_holdRefV = KH_holdRefV;
 
-    /*
-    Serial.print("Size of UserSettings: ");
-    Serial.println(sizeof(UserSettings));  // Debug size
-    Serial.println(" ");
-    Serial.print("Parsed fields: ");
-    Serial.println(parsedFields);
-    Serial.println(" ");
-    Serial.print("Updateding Parsed fields: ");
-    Serial.println(" ");
-*/
-
     PrintUserVariables();
 
     saveuserSettingsToEEPROM();
 
     loadUserSettingsFromEEPROM();
-
-    //printStructDetails();
 
     if (parsedFields <= 0) {
       return;  // or handle parse failure
@@ -196,13 +183,8 @@ void saveuserSettingsToEEPROM() {
   EEPROM.update(EEPROM_MAGIC_ADDR, EEPROM_MAGIC_VALUE);
 
   if (debugPwmLevel == 12) {
-    //Serial.println(" ");
-    //Serial.println("User settings saved to EEPROM.");
     PrintUserVariables();
   }
-  //Serial.println(" ");
-  //Serial.println("Settings After saving:");
-  //Serial.println(" ");
   PrintUserVariables();
 }
 
@@ -353,8 +335,6 @@ void clearAndResetEEPROM() {
 
   Serial.println("EEPROM cleared and reset with default values.");
 }
-
-
 
 void saveDebugLevelToEEPROM() {
   EEPROM.update(400, userSettings.debugPwmLevel);  // Use an arbitrary offset like 100

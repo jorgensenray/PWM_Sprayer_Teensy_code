@@ -176,10 +176,7 @@ void pulseCounter() {
 // ===== Kick & Hold (K&H) Tunables =====
 float KH_hzRate = 15.0f;     // informational
 float KH_dutyCycle = 0.50f;  // informational
-//unsigned long KH_kickDurationMs = 4;     // 2..4 ms typical     -  comment out in user settings 4
-//float KH_holdDutyCycle = 0.2f;           // 0.02..0.10 typical  -  comment out in user settings .04
-//unsigned long KH_holdPWMFrequency = 20;  // 200..1000 Hz        -  comment out in user settings 500
-//float KH_holdRefV = 12.6f;               //-  comment out in user settings
+
 bool KH_holdCompEnable = true;
 float KH_holdDutyMin = 0.01f;
 float KH_holdDutyMax = 0.30f;

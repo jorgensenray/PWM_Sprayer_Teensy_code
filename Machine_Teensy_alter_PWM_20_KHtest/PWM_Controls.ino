@@ -6,181 +6,82 @@
 // Declared because function uses a default parameter:
 void BasicPWM(size_t nozzleIndex, uint8_t currentPin, uint8_t dutyPercent = 50);
 // Forward declarations
+void ControlNozzles(size_t nozzleIndex, uint8_t currentPin, uint32_t cycleTimeMs);
 void EvenOdd(size_t nozzleIndex, uint8_t currentPin, bool globalEvenNozzlesActive);
 
 void PWM_Controls() {
 
-  // Recalculate period based on the current frequency.
-  period = static_cast<uint32_t>(1000.0 / userSettings.Hz);
-  unsigned long cycleTime = millis() % period;
-  bool globalEvenNozzlesActive = (cycleTime < (period / 2));
+  // Compute period ONCE per pass (and guarantee it's non-zero)
+  uint32_t hz = userSettings.Hz;
+  if (hz < 1) hz = 1;
+  period = 1000UL / hz;
+  if (period < 1) period = 1;
+
+  // Use a single shared timebase for ALL nozzles this pass
+  uint32_t cycleTimeMs = millis() % period;
+
+  // Do these ONCE per pass, not once per nozzle
+  boomLength = (numActiveNozzles * userSettings.SprayWidth);
+  TurnComp = (fabs(steerAngle) > userSettings.WheelAngle);
+
+  PrintAOGstuff();
+  Pressure();
+  Flow();
 
   for (size_t i = 0; i < pinStates.size(); i++) {
 
-    bool isPinOn = pinStates[i].state;
-    uint8_t currentPin = pinStates[i].pinNumber;
+    bool isPinOnLocal = pinStates[i].state;
+    uint8_t currentPinLocal = pinStates[i].pinNumber;
 
-    // ✅ STABLE nozzle index derived from physical pin (pins 1..16 => index 0..15)
-    // If your nozzle pins are not contiguous someday, we’ll swap this for a lookup table.
-    if (currentPin < 1 || currentPin > 64) {
-      continue;  // safety
-    }
-    size_t nozzleIndex = (size_t)(currentPin - 1);
-
-    if ((debugPwmLevel == 3) && (currentPin <= 3)) {
-      Serial.print("PWM_Controls: i=");
-      Serial.print(i);
-      Serial.print(" pin=");
-      Serial.print(currentPin);
-      Serial.print(" nozzleIndex=");
-      Serial.print(nozzleIndex);
-      Serial.print(" isPinOn=");
-      Serial.println(isPinOn ? "YES" : "NO");
+    // Safety: only handle nozzle pins 1..maxNozzles
+    if (currentPinLocal < 1 || currentPinLocal > maxNozzles) {
+      continue;
     }
 
-    boomLength = (numActiveNozzles * userSettings.SprayWidth);
-    pinNum = currentPin;  // global used elsewhere
+    size_t nozzleIndex = (size_t)(currentPinLocal - 1);
 
-    TurnComp = (fabs(steerAngle) > userSettings.WheelAngle);
+    pinNum = currentPinLocal;  // if you still rely on this global elsewhere
 
-    PrintAOGstuff();
-    Pressure();
-    Flow();
-
-    if (isPinOn) {
+    if (isPinOnLocal) {
 
       // Conventional PWM (no stagger)
       if ((userSettings.PWM_Conventional == 1) && (userSettings.Stagger == 0) && (TurnComp == false)) {
         setPWMTiming(userSettings.Hz, newDutyCycle, nozzleIndex);
-        ControlNozzles(nozzleIndex, currentPin);
+        ControlNozzles(nozzleIndex, currentPinLocal, cycleTimeMs);
       }
 
       // Even/Odd (stagger)
       if ((userSettings.PWM_Conventional == 1) && (userSettings.Stagger == 1) && (TurnComp == false)) {
-        EvenOdd(nozzleIndex, currentPin, globalEvenNozzlesActive);
-        ControlNozzles(nozzleIndex, currentPin);
+        EvenOdd(nozzleIndex, currentPinLocal, true /*unused*/);
+        ControlNozzles(nozzleIndex, currentPinLocal, cycleTimeMs);
       }
 
       // Even/Odd with turn comp
       if ((userSettings.PWM_Conventional == 1) && (userSettings.Stagger == 1) && (TurnComp == true)) {
-        EvenOdd(nozzleIndex, currentPin, globalEvenNozzlesActive);
+        EvenOdd(nozzleIndex, currentPinLocal, true /*unused*/);
         if (OnTime[nozzleIndex] > 0) {
-          NozzleSpeed(nozzleIndex, currentPin);
+          NozzleSpeed(nozzleIndex, currentPinLocal);
         }
-        ControlNozzles(nozzleIndex, currentPin);
+        ControlNozzles(nozzleIndex, currentPinLocal, cycleTimeMs);
       }
 
       // Conventional with turn comp (no stagger)
       if ((userSettings.PWM_Conventional == 1) && (userSettings.Stagger == 0) && (TurnComp == true)) {
-        NozzleSpeed(nozzleIndex, currentPin);
-        ControlNozzles(nozzleIndex, currentPin);
+        NozzleSpeed(nozzleIndex, currentPinLocal);
+        ControlNozzles(nozzleIndex, currentPinLocal, cycleTimeMs);
       }
 
       // Conventional ON/OFF (no PWM)
       if (userSettings.PWM_Conventional == 0) {
-        digitalWrite(currentPin, HIGH);
+        digitalWrite(currentPinLocal, HIGH);
       }
 
     } else {
-      digitalWrite(currentPin, LOW);
+      digitalWrite(currentPinLocal, LOW);
     }
   }
 }
 
-/*
-void PWM_Controls() {
-
-  // Recalculate period based on the current frequency.
-  period = static_cast<uint32_t>(1000.0 / userSettings.Hz);
-  unsigned long cycleTime = millis() % period;
-  bool globalEvenNozzlesActive = (cycleTime < (period / 2));
-
-  for (size_t i = 0; i < pinStates.size(); i++) {
-
-    isPinOn = pinStates[i].state;
-    boomLength = (numActiveNozzles * userSettings.SprayWidth);
-    uint8_t currentPin = pinStates[i].pinNumber;  // actual Teensy pin from mapping physical pin number (pins start at 1)
-    pinNum = currentPin;                          // Update global pinNum for later use
-
-    if (fabs(steerAngle) > userSettings.WheelAngle) {
-      TurnComp = true;
-    } else {
-      TurnComp = false;
-    }
-
-    PrintAOGstuff();
-    Pressure();
-    Flow();
-
-    if (isPinOn == 1) {
-
-
-      // Conventional PWM (no stagger): just set timing normally.
-      if ((userSettings.PWM_Conventional == 1) && (i < numActiveNozzles) && (userSettings.Stagger == 0) && (TurnComp == false)) {
-        if (printTimer == 5000) {
-          //Serial.println(" Conventional PWM (no stagger): just set timing normally. ");
-          printTimer = 0;
-        }
-        setPWMTiming(userSettings.Hz, newDutyCycle, i);
-        ControlNozzles(i, currentPin);
-      }
-
-      // Even/Odd (stagger) mode.
-      if ((userSettings.PWM_Conventional == 1) && (i < numActiveNozzles) && (userSettings.Stagger == 1) && (TurnComp == false)) {
-        if (printTimer == 5000) {
-          //Serial.println(" Even/Odd (stagger) mode. ");
-          printTimer = 0;
-        }
-        // Pass the global toggle state to EvenOdd.
-        EvenOdd(i, currentPin, globalEvenNozzlesActive);
-        ControlNozzles(i, currentPin);
-      }
-
-      // Even/Odd (stagger) with turn compensation.
-      if ((userSettings.PWM_Conventional == 1) && (i < numActiveNozzles) && (userSettings.Stagger == 1) && (TurnComp == true)) {
-        if (printTimer == 5000) {
-          //Serial.println(" Even/Odd (stagger) with turn compensation. ");
-          printTimer = 0;
-        }
-        EvenOdd(i, currentPin, globalEvenNozzlesActive);
-        // Only apply turn compensation if the nozzle is active (nonzero duty cycle)
-        if (OnTime[i] > 0) {
-          NozzleSpeed(i, currentPin);
-        }
-        ControlNozzles(i, currentPin);  // control nozzles with PWM;
-      }
-
-      // Conventional with turn compensation (even/odd off).
-      if ((userSettings.PWM_Conventional == 1) && (i < numActiveNozzles) && (userSettings.Stagger == 0) && (TurnComp == true)) {
-        if (printTimer == 5000) {
-          //Serial.println(" Conventional with turn compensation (even/odd off). ");
-          printTimer = 0;
-        }
-        NozzleSpeed(i, currentPin);
-        ControlNozzles(i, currentPin);
-      }
-
-      // Conventional on/off (non-adjusting - fixed PWM to keep the solenoids cool)
-      if (userSettings.PWM_Conventional == 0) {
-        digitalWrite(pinNum, HIGH);
-        //BasicPWM(i, currentPin);  // Use default 4.5Hz-50% duty cycle
-      }
-    }
-
-    // isPinOn is false
-    else {
-      if (printTimer == 5000) {
-        //Serial.println(" isPinOn is false ");
-        printTimer = 0;
-      }
-      digitalWrite(pinNum, LOW);
-    }
-    if (debugPwmLevel == 0) {
-      DebugRawPulses();
-    }
-  }
-}
-*/
 
 // ----- Fast GPA display filter -----
 // float gpaDisplay = 0.0f;           // fast-smoothed GPA for the user - made global
@@ -336,14 +237,17 @@ void Flow() {
 // setPWMTiming: Calculate OnTime per nozzle based on duty cycle
 //-------------------------------------------------------------------
 void setPWMTiming(unsigned int freq, float dutyCycle, size_t nozzleIndex) {
-  freq = userSettings.Hz;
-  period = static_cast<uint32_t>(1000.0 / freq);
+  // period is maintained in PWM_Controls() once per loop
 
   // Clamp duty
   if (dutyCycle < 0.0f) dutyCycle = 0.0f;
   if (dutyCycle > 100.0f) dutyCycle = 100.0f;
 
-  if (nozzleIndex < MAX_NOZZLES) {
+  if (nozzleIndex < maxNozzles) {
+    OnTime[nozzleIndex] = (uint32_t)((period * dutyCycle) / 100.0f);
+  }
+
+  if (nozzleIndex < maxNozzles) {
     OnTime[nozzleIndex] = static_cast<uint32_t>((period * dutyCycle) / 100.0f);
   }
   if (debugPwmLevel == 2) {
@@ -394,43 +298,6 @@ void EvenOdd(size_t nozzleIndex, uint8_t currentPin, bool /*globalEvenNozzlesAct
     Serial.println(phase);
   }
 }
-
-
-/*
-void EvenOdd(size_t nozzleIndex, uint8_t currentPin, bool globalEvenNozzlesActive) {
-  bool isEven = (currentPin % 2 == 0);
-
-  // Debug prints showing the decision for this nozzle.
-  if (debugPwmLevel == 5) {
-    Serial.print("EvenOdd Debug - Nozzle: ");
-    Serial.print(nozzleIndex);
-    Serial.print(" | Pin: ");
-    Serial.print(currentPin);
-    Serial.print(" | isEven: ");
-    Serial.print(isEven ? "true" : "false");
-    Serial.print(" | globalEvenNozzlesActive: ");
-    Serial.print(globalEvenNozzlesActive ? "true" : "false");
-  }
-
-  // Apply full duty cycle to one group and 0 to the other.
-  if (globalEvenNozzlesActive && isEven) {
-    if (debugPwmLevel == 5) {
-      Serial.println(" => Even branch: setting full duty cycle");
-    }
-    setPWMTiming(userSettings.Hz, newDutyCycle, nozzleIndex);
-  } else if (!globalEvenNozzlesActive && !isEven) {
-    if (debugPwmLevel == 5) {
-      Serial.println(" => Odd branch: setting full duty cycle");
-    }
-    setPWMTiming(userSettings.Hz, newDutyCycle, nozzleIndex);
-  } else {
-    if (debugPwmLevel == 5) {
-      Serial.println(" => Inactive branch: setting 0 duty cycle");
-    }
-    setPWMTiming(userSettings.Hz, 0, nozzleIndex);
-  }
-}
-*/
 
 float EMA(float newValue) {
   filteredADC = alpha * newValue + (1 - alpha) * filteredADC;
@@ -488,252 +355,81 @@ void Pressure() {
   }
 }
 
-void BasicPWM(size_t nozzleIndex, uint8_t currentPin, uint8_t dutyPercent) {
-  uint32_t basicPeriod = (1000 / userSettings.Hz);  // 222.22ms = 4.5Hz (adjust if needed)
-  uint32_t onTime = (basicPeriod * dutyPercent) / 100;
+void ControlNozzles(size_t nozzleIndex, uint8_t currentPin, uint32_t cycleTimeMs) {
 
-  if (nozzleState[nozzleIndex] == HIGH && PwmTimer[nozzleIndex] >= onTime) {
-    digitalWrite(currentPin, LOW);
-    nozzleState[nozzleIndex] = LOW;
-    PwmTimer[nozzleIndex] = 0;
-  } else if (nozzleState[nozzleIndex] == LOW && PwmTimer[nozzleIndex] >= (basicPeriod - onTime)) {
-    digitalWrite(currentPin, HIGH);
-    nozzleState[nozzleIndex] = HIGH;
-    PwmTimer[nozzleIndex] = 0;
-  }
-
-  if (pwmCycleTimer >= 1) {
-    PwmTimer[nozzleIndex]++;
-    pwmCycleTimer = 0;
-  }
-}
-
-void ControlNozzles(size_t nozzleIndex, uint8_t currentPin) {
-  // === Scheduler timing (unchanged) ===
   uint32_t perMs = period;
-  if (perMs == 0) {
+  if (perMs == 0 || nozzleIndex >= maxNozzles) {
     digitalWrite(currentPin, LOW);
     return;
   }
 
   uint32_t onMs = OnTime[nozzleIndex];
-  uint32_t rawPhase = PwmTimer[nozzleIndex];
-  uint32_t phaseMs = (rawPhase + PwmPhaseOffset[nozzleIndex]) % perMs;
 
-  // If this nozzle is "off" in this PWM cycle, keep it off.
-  if (onMs == 0) {
-    digitalWrite(currentPin, LOW);
-  }
+  // Phase with per-nozzle offset (stagger)
+  uint32_t phaseMs = (cycleTimeMs + PwmPhaseOffset[nozzleIndex]) % perMs;
 
-  // === Simple Kick + Hold using millis() ===
-  // One state per nozzle index
+  // ON window?
+  bool inOnWindow = (onMs > 0) && (phaseMs < onMs);
+
+  // ---- Simple Kick + Hold state per nozzle ----
   struct SimpleKHState {
     bool active;
-    bool inKick;
-    uint32_t startMs;  // start of this ON window
+    uint32_t startMs;  // start of ON window
   };
-  static SimpleKHState s[64];
+  static SimpleKHState st[64];
 
-  SimpleKHState& st = s[nozzleIndex];
+  SimpleKHState& s = st[nozzleIndex];
 
-  // Are we in the ON window this cycle?
-  if (phaseMs < onMs && onMs > 0) {
+  if (debugPwmLevel == 99) {
+    digitalWrite(currentPin, inOnWindow ? HIGH : LOW);
+    return;
+  }
 
-    // Start of ON window: initialize Kick & Hold state
-    if (!st.active) {
-      st.active = true;
-      st.inKick = true;
-      st.startMs = millis();
+  if (inOnWindow) {
+
+    // Detect start of ON window
+    if (!s.active) {
+      s.active = true;
+      s.startMs = millis();
     }
 
     uint32_t now = millis();
-    uint32_t elapsed = now - st.startMs;
+    uint32_t elapsed = now - s.startMs;
 
-    uint32_t kickMs = userSettings.KH_kickDurationMs;  // from PWMdefinitions.h
-    if (kickMs > onMs) kickMs = onMs;                  // clamp
+    uint32_t kickMs = userSettings.KH_kickDurationMs;
+    if (kickMs > onMs) kickMs = onMs;
 
-    // KICK phase: full ON
+    // KICK: full ON
     if (elapsed < kickMs) {
-      st.inKick = true;
       digitalWrite(currentPin, HIGH);
-    } else {
-      // HOLD phase: simple software PWM at modest frequency (to match loop rate)
-      st.inKick = false;
-
-      // Clamp frequency to something sane for millis timing
-      uint32_t freq = userSettings.KH_holdPWMFrequency;
-      if (freq < 5) freq = 5;
-      if (freq > 50) freq = 50;  // we can't reliably do high kHz in a big sketch
-
-      uint32_t holdPeriodMs = 1000UL / freq;
-      float duty = userSettings.KH_holdDutyCycle;  // 0.0–1.0
-      if (duty < 0.01f) duty = 0.01f;
-      if (duty > 0.9f) duty = 0.9f;
-
-      uint32_t onHoldMs = (uint32_t)(holdPeriodMs * duty);
-      uint32_t phaseHold = (now - (st.startMs + kickMs)) % holdPeriodMs;
-
-      if (phaseHold < onHoldMs) {
-        digitalWrite(currentPin, HIGH);
-      } else {
-        digitalWrite(currentPin, LOW);
-      }
+      return;
     }
+
+    // HOLD: low-frequency software PWM
+    uint32_t freq = userSettings.KH_holdPWMFrequency;
+    if (freq < 5) freq = 5;
+    if (freq > 50) freq = 60;
+
+    uint32_t holdPeriodMs = 1000UL / freq;
+
+    float duty = userSettings.KH_holdDutyCycle;  // 0..1
+    if (duty < 0.01f) duty = 0.01f;
+    if (duty > 0.9f) duty = 0.9f;
+
+    uint32_t onHoldMs = (uint32_t)(holdPeriodMs * duty);
+
+    uint32_t holdPhase = (now - (s.startMs + kickMs)) % holdPeriodMs;
+
+    digitalWrite(currentPin, (holdPhase < onHoldMs) ? HIGH : LOW);
+    return;
 
   } else {
-    // OFF window: ensure LOW and reset state for next period
+    // OFF window: ensure LOW and reset for next ON window
     digitalWrite(currentPin, LOW);
-    st.active = false;
-    st.inKick = false;
-  }
-
-  // === Your existing per-nozzle timing (unchanged) ===
-  if (pwmCycleTimer >= 1) {
-    PwmTimer[nozzleIndex]++;
-    pwmCycleTimer = 0;
-  }
-  if (PwmTimer[nozzleIndex] >= perMs) {
-    PwmTimer[nozzleIndex] = 0;
-  }
-
-  // === Old direct-PWM code for reference (now disabled) ===
-  /*
-  if (nozzleState[nozzleIndex] == HIGH) {
-    if (PwmTimer[nozzleIndex] >= OnTime[nozzleIndex]) {
-      digitalWrite(currentPin, LOW);
-      nozzleState[nozzleIndex] = LOW;
-    } else {
-      digitalWrite(currentPin, HIGH);
-    }
-  } else if (nozzleState[nozzleIndex] == LOW) {
-    if (PwmTimer[nozzleIndex] == 0) {
-      digitalWrite(currentPin, HIGH);
-      nozzleState[nozzleIndex] = HIGH;
-    } else {
-      digitalWrite(currentPin, LOW);
-    }
-  }
-  if (pwmCycleTimer >= 1) {
-    PwmTimer[nozzleIndex]++;
-    pwmCycleTimer = 0;
-  }
-  if (PwmTimer[nozzleIndex] >= period) {
-    PwmTimer[nozzleIndex] = 0;
-  }
-  */
-}
-
-
-/*
-void ControlNozzles(size_t nozzleIndex, uint8_t currentPin) {
-  if (debugPwmLevel == 3) {
-    if (printTimer > PrintFrequency) {
-      Serial.print("🔍 ControlNozzles - Nozzle: ");
-      Serial.print(nozzleIndex);
-      Serial.print(" | Pin: ");
-      Serial.print(currentPin);
-      Serial.print(" | isPinOn: ");
-      Serial.print(nozzleState[nozzleIndex]);  // ✅ Use per-nozzle state
-      Serial.print(" | PwmTimer[");
-      Serial.print(nozzleIndex);
-      Serial.print("]: ");
-      Serial.print(PwmTimer[nozzleIndex]);
-      Serial.print(" | OnTime[");
-      Serial.print(nozzleIndex);
-      Serial.print("]: ");
-      Serial.print(OnTime[nozzleIndex]);
-      Serial.print(" | (period - OnTime[");
-      Serial.print(nozzleIndex);
-      Serial.print("]) = ");
-      Serial.println(period - OnTime[nozzleIndex]);
-      printTimer = 0;
-    }
-  }
-
-  // Hardened K&H-driven ControlNozzles: keep your timing, replace only the drive
-  //void ControlNozzles(size_t nozzleIndex, uint8_t currentPin) {
-  // --- Required timing from your scheduler (unchanged) ---
-  // PwmTimer[nozzleIndex] : ms elapsed in this nozzle's current period
-  // OnTime[nozzleIndex]   : ms ON window for this nozzle
-  // period                : total ms in one PWM cycle (all nozzles share)
-  // pwmCycleTimer         : your 1ms heartbeat (elapsedMillis)
-
-  // Safety guards
-  uint32_t perMs = period;
-  if (perMs == 0) {
-    // If something upstream didn't set period yet, fail-safe to LOW and exit.
-    digitalWrite(currentPin, LOW);
+    s.active = false;
     return;
   }
-
-  uint32_t onMs = OnTime[nozzleIndex];
-  uint32_t phaseMs = PwmTimer[nozzleIndex];
-
-  // If ON window is zero, force LOW and ensure we start fresh next time
-  if (onMs == 0) {
-    digitalWrite(currentPin, LOW);
-    // K&H entry flag will reset below in OFF path
-  }
-
-  // One flag per NOZZLE index (safer than pin-number indexing)
-  static bool khStartedPerNozzle[64] = { false };
-
-  // ===== K&H waveform over your ON window =====
-  if (phaseMs < onMs && onMs > 0) {
-    // We are inside the ON window → ensure KH_Begin runs once per window
-    if (!khStartedPerNozzle[nozzleIndex]) {
-      KH_Begin(currentPin);  // primes Kick phase & resets K&H per-pin state
-      khStartedPerNozzle[nozzleIndex] = true;
-    }
-
-    // Non-blocking service; it will drive: Kick then Hold PWM, then force LOW at end of onMs
-    (void)KH_Service(currentPin, onMs);
-
-  } else {
-    // OFF window → ensure pin LOW and arm for the next period's ON window
-    digitalWrite(currentPin, LOW);
-    khStartedPerNozzle[nozzleIndex] = false;
-  }
-
-  // ===== Period/phase accounting (unchanged) =====
-  if (pwmCycleTimer >= 1) {
-    PwmTimer[nozzleIndex]++;
-    pwmCycleTimer = 0;
-  }
-  if (PwmTimer[nozzleIndex] >= perMs) {
-    PwmTimer[nozzleIndex] = 0;
-  }
-
-  if (PwmTimer[nozzleIndex] == 0) {
-    Serial.printf("K&H begin on pin %u, onMs=%lu, perMs=%lu\r\n", currentPin, (unsigned long)onMs, (unsigned long)perMs);
-  }
-  //}
-
-  // ===== Original direct-PWM/toggle code (disabled; keep for reference) =====
-  // if (nozzleState[nozzleIndex] == HIGH) {
-  //   if (PwmTimer[nozzleIndex] >= OnTime[nozzleIndex]) {
-  //     digitalWrite(currentPin, LOW);
-  //     nozzleState[nozzleIndex] = LOW;
-  //   } else {
-  //     digitalWrite(currentPin, HIGH);
-  //   }
-  // } else if (nozzleState[nozzleIndex] == LOW) {
-  //   if (PwmTimer[nozzleIndex] == 0) {
-  //     digitalWrite(currentPin, HIGH);
-  //     nozzleState[nozzleIndex] = HIGH;
-  //   } else {
-  //     digitalWrite(currentPin, LOW);
-  //   }
-  // }
-  // if (pwmCycleTimer >= 1) {
-  //   PwmTimer[nozzleIndex]++;
-  //   pwmCycleTimer = 0;
-  // }
-  // if (PwmTimer[nozzleIndex] >= period) {
-  //   PwmTimer[nozzleIndex] = 0;
-  // }
 }
-*/
 
 void NozzleSpeed(size_t nozzleIndex, uint8_t currentPin) {
   // If EvenOdd already set this nozzle off, skip turn compensation.
@@ -830,72 +526,11 @@ void PrintAOG() {
   }
 }
 
-void Calibrate_PSI_Flow() {
-
-  digitalWrite(1, HIGH);
-
-  Pressure();
-
-  if (Flow_Timer > 100) {
-    detachInterrupt(digitalPinToInterrupt(flowSensorPin));  // Suspend interrupt during calculations
-
-    // Calculate the average pulse count and flow rate (LPM)
-    pulseAvg.addValue(pulseCount);
-    float pulseCountAve = pulseAvg.getAverage();
-    flowRate = pulseCountAve / userSettings.FlowCalibration;  // Flow rate in LPM
-
-    // Convert to GPM and calculate the actual GPA
-    GPM = flowRate / 3.785;  // Convert LPM to GPM
-    actualGPA = (GPM * 5940) / (gpsSpeed * (userSettings.SprayWidth));
-    GPA_Avg.addValue(actualGPA);
-    actualGPAave = GPA_Avg.getAverage();
-
-    // Update FlowCalibration based on the difference between target and actual GPA
-    float errorGPA = actualGPAave - userSettings.GPATarget;
-
-    float adjustmentFactor = 0.01;
-
-    if ((errorGPA < 0.02) && (errorGPA > 0.00)) {
-      Serial.print("Calibration complete - value = ");
-      Serial.print(userSettings.FlowCalibration);
-      saveuserSettingsToEEPROM();
-      Serial.print(" has been saved to EEPROM. ");
-    }
-
-    userSettings.FlowCalibration += adjustmentFactor * errorGPA;
-
-    pulseCount = 0;  // Reset pulse counter
-    Flow_Timer = 0;  // Reset timer
-
-    attachInterrupt(digitalPinToInterrupt(flowSensorPin), pulseCounter, FALLING);
-
-    // Print debug information
-    Serial.print(" Output: ");
-    Serial.print(Output);
-    Serial.print(" | pressure: ");
-    Serial.print(pressure);
-    Serial.print(" | FlowCalibration: ");
-    Serial.print(userSettings.FlowCalibration, 3);
-    Serial.print(" | actualGPAave: ");
-    Serial.print(actualGPAave);
-    Serial.print(" | GPATarget: ");
-    Serial.println(userSettings.GPATarget);
-  }
-}
-
 void setupNozzles() {
-  for (uint8_t i = 0; i < MAX_NOZZLES; i++) {
+  for (uint8_t i = 0; i < maxNozzles; i++) {
     OnTime[i] = 0;
     PwmTimer[i] = 0;
   }
-}
-
-void pwmtimerstates() {
-  static unsigned long lastUpdate = 0;  // Static ensures it retains its value across calls
-  for (auto& pinState : pinStates) {
-    PwmTimer[pinState.pinNumber] += millis() - lastUpdate;  // Update the timer for the pin
-  }
-  lastUpdate = millis();  // Update the last timestamp
 }
 
 void setDebugPwmLevel(uint8_t level) {
@@ -1038,4 +673,19 @@ void debugPinMapping() {
     Serial.print(" state=");
     Serial.println(machine.state.functions[funcIndex] ? "ON" : "OFF");
   }
+}
+
+// Reset PWM phase/timers (does NOT zero OnTime[] so you don't stomp duty calculations)
+void resetPwmState() {
+  for (uint8_t i = 0; i < maxNozzles; i++) {
+    PwmTimer[i] = 0;
+    PwmPhaseOffset[i] = 0;
+    nozzleState[i] = LOW;
+  }
+}
+
+// Call this to reset *everything* that should be “fresh” for a new spray run
+void resetSprayRunState() {
+  resetFlowAverages();  // your existing function
+  resetPwmState();      // PWM timers/phase
 }

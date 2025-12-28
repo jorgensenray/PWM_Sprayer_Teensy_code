@@ -27,42 +27,6 @@ void updateMachineOutputs() {
     //digitalWrite(machineOutputPins[i], machine.state.functions[machine.config.pinFunction[i]] == machine.config.isPinActiveHigh);  // ==, XOR
   }
 }
-/*
-void updatePinStates() {   // “send me the full updatePinStates() with reset included”
-  pinStates.clear();     // Clear previous states
-  numActiveNozzles = 0;  // Reset the count
-
-  for (uint8_t i = 0; i < numMachineOutputs; i++) {
-    uint8_t pinNum = machineOutputPins[i];  // pin 1–16
-    bool isPinOn = static_cast<bool>(
-      machine.state.functions[machine.config.pinFunction[i]]);
-
-    bool found = false;
-    for (auto& pinState : pinStates) {
-      if (pinState.pinNumber == pinNum) {
-        // Update state if needed
-        if (pinState.state != isPinOn) {
-          pinState.state = isPinOn;
-        }
-        if (isPinOn) {
-          numActiveNozzles++;
-        }
-        found = true;
-        break;
-      }
-    }
-
-    if (!found) {
-      pinStates.push_back({ pinNum, isPinOn });
-      if (isPinOn) {
-        numActiveNozzles++;
-      }
-    }
-  }
-
-  setupNozzles();  // adjust K&H memory to match active nozzles
-}
-*/
 
 void updatePinStates() {
   pinStates.clear();
@@ -79,18 +43,19 @@ void updatePinStates() {
     if (isOnLocal) numActiveNozzles++;
   }
 
-  // ---- detect OFF→ON transition & reset flow filters ----
-  static bool spraying = false;
+  // ---- Spray ON/OFF transition handling ----
+  static bool wasSpraying = false;
   bool nowSpraying = (numActiveNozzles > 0);
 
-  if (nowSpraying && !spraying) {
-    resetFlowAverages();   // fresh GPA/flow for this spray run
-    // Optional: also reset PWM phase timing at spray start
-    // setupNozzles();
+  // If we just stopped spraying (end-row / all valves OFF)
+  if (!nowSpraying && wasSpraying) {
+    resetSprayRunState();
   }
 
-  spraying = nowSpraying;
+
+  wasSpraying = nowSpraying;
 }
+
 
 
 void setOutputPinModes() {

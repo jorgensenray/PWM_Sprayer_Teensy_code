@@ -23,10 +23,6 @@ void PWM_setup() {
   Serial.print("Size of UserSettings: ");
   Serial.println(sizeof(UserSettings));
 
-  //clearAndResetEEPROM();  // Reset EEPROM on startup (remove after testing)
-  //strncpy(userSettings.unit, "Imperial", sizeof(userSettings.unit));
-  //userSettings.unit[sizeof(userSettings.unit) - 1] = '\0';  // ensure null-termination
-
   // Initialize the PID controller with the loaded settings
   myPID.SetTunings(userSettings.Kp, userSettings.Ki, userSettings.Kd);
   Setpoint = userSettings.PressureTarget;
@@ -43,7 +39,8 @@ void PWM_setup() {
 
   // Set the default duty cycle at startup
   userSettings.currentDutyCycle = defaultDutyCycle;
+
+  resetSprayRunState();
   updatePinStates();
-  
-  debugPinMapping();
+  //debugPinMapping();
 }

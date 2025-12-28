@@ -48,11 +48,11 @@ MACHINE::States machineStates;
 //byte machineOutputPins[numMachineOutputs] = { 12, 13, 5, 23, 19, 18, 21, 22 };
 //byte machineOutputPins[numMachineOutputs] = { 12, 13, 5, 23, 19, 18, 21, 22, 14, 27, 16, 17, 25, 26, 4 };
 
-//const byte numMachineOutputs = 17;
-//byte machineOutputPins[numMachineOutputs] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+//const byte numMachineOutputs = 16;
+//byte machineOutputPins[numMachineOutputs] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
 
-const byte numMachineOutputs = 16;
-byte machineOutputPins[numMachineOutputs] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+const byte numMachineOutputs = 36;
+byte machineOutputPins[numMachineOutputs] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38};
 
 void setup() {
   delay(250);
